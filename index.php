@@ -205,8 +205,11 @@ function streamWarmResults(): void
     $method        = in_array(strtoupper($_POST['method'] ?? 'GET'), ['GET','HEAD'], true)
                         ? strtoupper($_POST['method']) : 'GET';
 
+    // Resolve PHP binary — prefer PHP_BINARY, fall back to 'php' on PATH
+    $phpBin = (PHP_BINARY && is_executable(PHP_BINARY)) ? PHP_BINARY : 'php';
+
     $argv = [
-        PHP_BINARY,
+        escapeshellarg($phpBin),
         escapeshellarg(__DIR__ . '/run.php'),
         escapeshellarg($sitemapSource),
         '--verbose',
