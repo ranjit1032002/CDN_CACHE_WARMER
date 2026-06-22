@@ -1,10 +1,5 @@
 FROM php:8.4-apache
 
-# Install libcurl dev headers, then compile the PHP curl extension
-RUN apt-get update && apt-get install -y libcurl4-openssl-dev \
-    && docker-php-ext-install curl \
-    && rm -rf /var/lib/apt/lists/*
-
 # Copy all project files into the web root
 COPY . /var/www/html/
 
