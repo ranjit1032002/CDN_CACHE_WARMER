@@ -4,9 +4,6 @@
  *
  * Upload a sitemap.xml (or provide a URL) and warm all listed URLs.
  * Results stream to the browser in real time.
- *
- * NOTE: This file must be served by a PHP-capable web server (Apache/Nginx/php -S).
- *       It should NOT be publicly exposed without authentication.
  */
 
 // ── Security: block CLI calls ─────────────────────────────────────────────────
@@ -14,12 +11,127 @@ if (PHP_SAPI === 'cli') {
     exit("Use run.php for CLI usage.\n");
 }
 
+// ── Authentication config ─────────────────────────────────────────────────────
+// Set credentials via environment variables (recommended) or change defaults here.
+define('AUTH_USER',     getenv('WARMER_USER')     ?: 'ranjit');
+define('AUTH_PASSWORD', getenv('WARMER_PASSWORD') ?: 'Ranjit@9062');
+define('SESSION_NAME',  'cdnwarmer_sess');
+
+// ── Session-based auth ────────────────────────────────────────────────────────
+session_name(SESSION_NAME);
+session_start();
+
+// Handle logout
+if (isset($_GET['logout'])) {
+    session_destroy();
+    header('Location: /');
+    exit;
+}
+
+// Handle login form submission
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'login') {
+    $user = trim($_POST['username'] ?? '');
+    $pass = $_POST['password'] ?? '';
+    if ($user === AUTH_USER && hash_equals(AUTH_PASSWORD, $pass)) {
+        session_regenerate_id(true);
+        $_SESSION['authed'] = true;
+        header('Location: /');
+        exit;
+    } else {
+        $loginError = 'Invalid username or password.';
+    }
+}
+
+// Gate: show login page if not authenticated
+if (empty($_SESSION['authed'])) {
+    showLoginPage($loginError ?? null);
+    exit;
+}
+
 define('UPLOAD_TMP_DIR', sys_get_temp_dir());
 
-// ── Handle form submission (AJAX/streaming) ───────────────────────────────────
+// ── Handle warm request (AJAX/streaming) ──────────────────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'warm') {
     streamWarmResults();
     exit;
+}
+
+// ── Login page renderer ───────────────────────────────────────────────────────
+function showLoginPage(?string $error): void
+{
+    ?>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CDN Cache Warmer — Login</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #0f1117; --surface: #1a1d27; --border: #2e3147;
+    --accent: #6c63ff; --accent-h: #8b85ff; --text: #e2e8f0;
+    --muted: #8892a4; --error: #f87171; --radius: 10px;
+  }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
+    min-height: 100vh; display: flex; align-items: center; justify-content: center;
+  }
+  .login-box {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 2.5rem 2rem; width: 100%; max-width: 380px;
+  }
+  h1 {
+    font-size: 1.4rem; font-weight: 700; margin-bottom: .25rem;
+    background: linear-gradient(90deg, #6c63ff, #38bdf8);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  }
+  .subtitle { color: var(--muted); font-size: .85rem; margin-bottom: 1.75rem; }
+  .field { display: flex; flex-direction: column; gap: .4rem; margin-bottom: 1rem; }
+  label { font-size: .78rem; font-weight: 500; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+  input[type=text], input[type=password] {
+    background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+    color: var(--text); padding: .55rem .75rem; font-size: .9rem; width: 100%;
+    transition: border-color .15s;
+  }
+  input:focus { outline: none; border-color: var(--accent); }
+  .btn {
+    width: 100%; background: var(--accent); color: #fff; border: none;
+    border-radius: 7px; padding: .7rem; font-size: .95rem; font-weight: 600;
+    cursor: pointer; margin-top: .5rem; transition: background .15s;
+  }
+  .btn:hover { background: var(--accent-h); }
+  .error {
+    background: rgba(248,113,113,.1); border: 1px solid rgba(248,113,113,.3);
+    color: var(--error); border-radius: 6px; padding: .6rem .85rem;
+    font-size: .85rem; margin-bottom: 1rem;
+  }
+</style>
+</head>
+<body>
+<div class="login-box">
+  <h1>CDN Cache Warmer</h1>
+  <p class="subtitle">Sign in to continue</p>
+  <?php if ($error): ?>
+    <div class="error"><?= htmlspecialchars($error) ?></div>
+  <?php endif; ?>
+  <form method="POST">
+    <input type="hidden" name="action" value="login">
+    <div class="field">
+      <label for="username">Username</label>
+      <input type="text" id="username" name="username" autofocus autocomplete="username" required>
+    </div>
+    <div class="field">
+      <label for="password">Password</label>
+      <input type="password" id="password" name="password" autocomplete="current-password" required>
+    </div>
+    <button type="submit" class="btn">Sign In</button>
+  </form>
+</div>
+</body>
+</html>
+    <?php
 }
 
 /**
@@ -420,7 +532,10 @@ function parseSummaryLine(string $line, int &$total, int &$success, int &$warnin
 <body>
 <div class="container">
 
-  <h1>CDN Cache Warmer</h1>
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.25rem;">
+    <h1 style="margin-bottom:0">CDN Cache Warmer</h1>
+    <a href="/?logout=1" style="font-size:.8rem;color:var(--muted);text-decoration:none;border:1px solid var(--border);padding:.3rem .75rem;border-radius:6px;transition:color .15s;" onmouseover="this.style.color='var(--error)'" onmouseout="this.style.color='var(--muted)'">Sign out</a>
+  </div>
   <p class="subtitle">Upload a sitemap XML or paste a URL to warm all listed pages at the CDN edge.</p>
 
   <!-- ── Configuration form ── -->
